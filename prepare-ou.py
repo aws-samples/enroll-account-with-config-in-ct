@@ -622,9 +622,9 @@ if __name__ == '__main__':
 
     # Dry run to list the Config changes
     if dry_run:
-        LOGGER.info('###############  DRY RUN MODE  ###############')
+        LOGGER.info('\n#########################  DRY RUN MODE  ##############################\n')
         for account in accounts:
-            LOGGER.info('******************** Config resources in account : %s ********************',account)
+            LOGGER.info('******************** These Config resources in account : %s are expected to be updated. ********************\n',account)
             session = get_sts_session(account, get_org_id())
             if session:
                 for region in region_list:
@@ -660,7 +660,7 @@ if __name__ == '__main__':
             create_config_recorder_role(session, account, home_region)
 
         for region in region_list:
-            LOGGER.info('--------------------- Updating %s region -----------------------', region)
+            LOGGER.info('--------------------- Updating config ressources in region : %s-----------------------', region)
             client = session.client('config', region_name=region)
             ##### Update Config recorders
             config_recorders = list_configuration_recorders(client)

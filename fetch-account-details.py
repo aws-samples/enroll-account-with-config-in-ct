@@ -100,70 +100,42 @@ def get_accounts_ou(ou_id):
 def does_ou_exists(ou_object):
     '''Return True if OU exists'''
 
-    ou_id_matched = bool(match('^ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}$', ou_object))
     output = True
-
-    if not ou_id_matched:
-        ou_map = get_ou_map()
-        if ou_object not in ou_map.keys():
-            output = False
+    root_id = list_org_roots()
+    ou_ids = get_ou_ids(root_id)
+    if ou_object not in ou_ids:
+        output = False
 
     return output
 
-def get_ou_map():
-    '''Generate ou-id to ou-name mapping'''
+def get_ou_ids(parent_id):
+    ''' Return a list of all OU ID including nested OU'''
+    full_result = []
 
-    ou_list = list_all_ou()
-    ou_map = {}
-
-    for ou_item in ou_list:
-        try:
-            ou_describe = ORG.describe_organizational_unit(OrganizationalUnitId=ou_item)
-            ou_info = ou_describe['OrganizationalUnit']
-            ou_map[ou_info['Name']] = ou_info['Id']
-        except ClientError as exe:
-            error_and_exit('Unable to get the OU information' + str(exe))
-
-    return ou_map
-
-def list_all_ou():
-    '''List all OUs in an organization'''
-
-    org_info = []
-    root_id = list_org_roots()
     try:
-        child_dict = ORG.list_children(ParentId=root_id,
-                                       ChildType='ORGANIZATIONAL_UNIT')
-        child_list = child_dict['Children']
+        paginator = ORG.get_paginator('list_children')
+        iterator  = paginator.paginate(
+            ParentId=parent_id,
+            ChildType='ORGANIZATIONAL_UNIT'
+        )
     except ClientError as exe:
-        error_and_exit('Unable to get children list' + str(exe))
+        error_and_exit('\nUnable to paginate on list_childrenpplied OU.() of su')
+    for page in iterator:
+        for ou in page['Children']:
+            full_result.append(ou['Id'])
+            full_result.extend(get_ou_ids(ou['Id']))
 
-    while 'NextToken' in child_dict:
-        next_token = child_dict['NextToken']
-        try:
-            child_dict = ORG.list_children(ParentId=root_id,
-                                           ChildType='ORGANIZATIONAL_UNIT',
-                                           NextToken=next_token)
-            child_list += child_dict['Children']
-        except ClientError as exe:
-            error_and_exit('Unable to get complete children list' + str(exe))
-    for item in child_list:
-        org_info.append(item['Id'])
-    if len(org_info) == 0:
-        error_and_exit('No Organizational Units Found')
-
-    return org_info
+    return full_result
 
 def list_org_roots():
     '''List organization roots'''
-
     value = None
     try:
         root_info = ORG.list_roots()
     except ClientError as exe:
         error_and_exit('Script should run on Organization root only: ' +
                        str(exe))
-    if 'Roots' in root_info:
+    if 'Roots' in root_info and len(root_info) > 0:
         value = root_info['Roots'][0]['Id']
     else:
         error_and_exit('Unable to find valid root: ' + str(root_info))
@@ -181,9 +153,8 @@ if __name__ == '__main__':
     home_region = None
 
     if does_ou_exists(ou_id):
-        LOGGER.info('\n Contact customer support with a ticket, to add the accounts to the AWS Control Tower allowed list')
+        LOGGER.info('\nContact AWS customer support with a ticket, to add the accounts to the AWS Control Tower allowed list')
         LOGGER.info('\n *** Use below text in your AWS support ticket *** \n')
-
         LOGGER.info('Subject Line: Enroll accounts that have existing AWS Config resources into AWS Control Tower')
         LOGGER.info('------------\n')
         LOGGER.info('Ticket body:')
@@ -194,5 +165,6 @@ if __name__ == '__main__':
         accounts = get_accounts_ou(ou_id)
         LOGGER.info('\nList of member accounts under the %s OU to be added in allowed list:', ou_id)
         print('\n'.join('{}: {}'.format(*k) for k in enumerate(accounts, start=1)))
+        LOGGER.info('------------')
     else:
-        error_and_exit('Supplied OU does not exist.')
+        error_and_exit('\n/!\ ERROR : Supplied OU does not exist.\n')
