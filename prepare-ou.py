@@ -1,4 +1,4 @@
-#
+    #
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 #
@@ -424,16 +424,22 @@ def update_config_recorder(session, account, region, config_recorder_name):
     '''Update Config recorder'''
     client = session.client('config', region_name=region)
     result = False
+    #Setting GLOBAL_CONFIGURATION_RECORDER to False
+    GCR = False
+    
+    if region == home_region:
+        GCR = True
 
     role_arn = 'arn:aws:iam::'+account+':role/aws-controltower-ConfigRecorderRole-customer-created'
     try:
+    
         response = client.put_configuration_recorder(
             ConfigurationRecorder={
                 'name': config_recorder_name,
                 'roleARN': role_arn,
                 'recordingGroup': {
                     'allSupported': True,
-                    'includeGlobalResourceTypes': True,
+                    'includeGlobalResourceTypes': GCR,
                 'resourceTypes': []
                 }
             }
@@ -518,13 +524,19 @@ def create_config_resources(region, master_id, account):
     '''
     LOGGER.info('Config resources does not exists in ControlTower governed region %s. Creating Config resources in account %s...', region, account)
     ss_bucket = 'marketplace-sa-resources.s3.amazonaws.com/ct-blogs-content'
-    ss_url = 'https://' + ss_bucket + '/CTConfigResources.yml'
+    ss_url = 'https://' + ss_bucket + '/CTConfigResources_v2.yml'
     ss_name = 'CTConfigResources-StackSet'
+    
+    #Setting GLOBAL_CONFIGURATION_RECORDER to False
+    GCR = "false"
+    
     ss_param = [{'ParameterKey': 'LoggingAccount', 'ParameterValue': log_account},
                 {'ParameterKey': 'HomeRegion', 'ParameterValue': home_region},
                 {'ParameterKey': 'OrganizationID', 'ParameterValue': AWSLogsS3KeyPrefix},
-                {'ParameterKey': 'AuditAccount', 'ParameterValue': audit_account_id}]
-    result = False
+                {'ParameterKey': 'AuditAccount', 'ParameterValue': audit_account_id},
+                {'ParameterKey': 'GlobalConfigurationRecorder', 'ParameterValue': GCR}]
+                
+    result = "False"
     op_id = None
     ss_status = 'RUNNING'
 
@@ -549,13 +561,54 @@ def create_config_resources(region, master_id, account):
 
     # Wait for resources creation completion
     while ss_status in ('RUNNING', 'QUEUED', 'STOPPING'):
-        LOGGER.info('Creating config ressources, wait 20 sec: %s',
+        LOGGER.info('Creating config resources, wait 20 sec: %s',
                     ss_status)
         ss_status = check_ss_status(ss_name, op_id)
         sleep(20)
 
     if ss_status == "FAILED" :
-        error_and_exit('\nUnable to create Config ressources in the account : %s  and region : %s', account, region)
+        error_and_exit('\nUnable to create Config resources in the account : %s  and region : %s', account, region)
+        
+        
+    if region == home_region:
+        GCR = "true"
+        print("In home region....\n")
+        try:
+            param_overrides = [{'ParameterKey': 'LoggingAccount', 'ParameterValue': log_account},
+                    {'ParameterKey': 'HomeRegion', 'ParameterValue': home_region},
+                    {'ParameterKey': 'OrganizationID', 'ParameterValue': AWSLogsS3KeyPrefix},
+                    {'ParameterKey': 'AuditAccount', 'ParameterValue': audit_account_id},
+                    {'ParameterKey': 'GlobalConfigurationRecorder', 'ParameterValue': GCR}]
+                    
+            # OperationPreferences = {
+            #         'RegionConcurrencyType': 'PARALLEL'
+            #     }
+                    
+            result = CFT.update_stack_instances(StackSetName=ss_name,
+                                          Accounts=[account],
+                                          Regions=[region],
+                                          ParameterOverrides=param_overrides)
+                                        #   OperationPreferences=OperationPreferences)
+                                          
+        except ClientError as exe:
+            error_msg = str(exe.response['Error']['Message'])
+            if 'Update of stack set failed in home_region with :' in error_msg:
+                LOGGER.info('Update of Config resource stack set failed in home region %s', home_region)
+                result = True
+            else:
+                raise exe
+        
+        op_id = result['OperationId']
+        ss_status = 'RUNNING'
+        # Wait for resources update completion
+        while ss_status in ('RUNNING', 'QUEUED', 'STOPPING'):
+            LOGGER.info('Updating config resource stack in home region, wait 20 sec: %s',
+                        ss_status)
+            ss_status = check_ss_status(ss_name, op_id)
+            sleep(20)
+    
+        if ss_status == "FAILED" :
+            error_and_exit('\nUnable to update Config resource in the account : %s  and in home region : %s', account, region)
 
 def add_config_stack_instance(ss_name, region_name, account):
     '''Add stack instance to the existing StackSet'''
