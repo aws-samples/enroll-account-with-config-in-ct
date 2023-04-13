@@ -104,15 +104,16 @@ def get_required_data():
 
 def get_accounts_ou(ou_id):
     '''List of accounts in an organizational unit'''
-    accounts = []
-    results = []
+    accounts = list()
     try:
-        results = ORG.list_accounts_for_parent(ParentId=ou_id)['Accounts']
+        accounts_paginator = ORG.get_paginator("list_accounts_for_parent")
+        accounts_iterator = accounts_paginator.paginate(ParentId=ou_id)
     except ClientError as exe:
-        LOGGER.error('Unable to get Accounts list: ' + str(exe))
-    for result in results:
-        if result['Id'] :
-            accounts.append(result['Id'])
+        LOGGER.error("Unable to get Accounts list: " + str(exe))
+    for page in accounts_iterator:
+        for account_info in page["Accounts"]:
+            if account_info["Id"]:
+                accounts.append(account_info["Id"])
     return accounts
 
 def assume_role(account):
